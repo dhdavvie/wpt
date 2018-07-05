@@ -326,6 +326,9 @@ class Http2WebTestRequestHandler(_WebTestRequestHandler):
         data = self.conn.data_to_send()
         self.request.sendall(data)
 
+        self.request_threads = []
+        self.h2_lock = threading.Lock()
+
         while not self.close_connection:
             try:
                 # This size may need to be made variable based on remote settings?
@@ -338,7 +341,9 @@ class Http2WebTestRequestHandler(_WebTestRequestHandler):
                     if isinstance(event, RequestReceived):
                         self.logger.debug('(%s) Parsing RequestReceived' % (uid))
                         self._h2_parse_request(event)
-                        self.finish_handling(True, H2Response)
+                        t = threading.Thread(target=_WebTestRequestHandler.finish_handling, args=(self, True, H2Response))
+                        self.request_threads.append(t)
+                        t.start()
                     if isinstance(event, ConnectionTerminated):
                         self.logger.debug('(%s) Connection terminated by remote peer ' % (uid))
                         self.close_connection = True
@@ -346,6 +351,8 @@ class Http2WebTestRequestHandler(_WebTestRequestHandler):
             except (socket.timeout, socket.error) as e:
                 self.logger.debug('(%s) ERROR - Closing Connection - \n%s' % (uid, str(e)))
                 self.close_connection = True
+                for t in self.request_threads:
+                    t.join()
 
     def _h2_parse_request(self, event):
         self.headers = H2Headers(event.headers)

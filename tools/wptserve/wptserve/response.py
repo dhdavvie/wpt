@@ -381,10 +381,9 @@ class H2ResponseWriter(object):
     def __init__(self, handler, response):
         self.socket = handler.request
         self.h2conn = handler.conn
+        self.h2_lock = handler.h2_lock
         self._response = response
         self._handler = handler
-        self._headers_seen = set()
-        self._headers_complete = False
         self.content_written = False
         self.request = response.request
         self.logger = response.logger
@@ -403,12 +402,14 @@ class H2ResponseWriter(object):
         formatted_headers.append((':status', str(status_code)))
         formatted_headers.extend(secondary_headers)
 
+        self.h2_lock.acquire()
         self.h2conn.send_headers(
             stream_id=self.request.h2_stream_id,
             headers=formatted_headers,
         )
 
         self.write()
+        self.h2_lock.release()
 
     def write_content(self, item, last=False):
         if isinstance(item, (text_type, binary_type)):
@@ -431,6 +432,7 @@ class H2ResponseWriter(object):
         self._write_content(data.read(), last)
 
     def _write_content(self, data, last):
+        self.h2_lock.acquire()
         self.h2conn.send_data(
             stream_id=self.request.h2_stream_id,
             data=data,
@@ -438,6 +440,7 @@ class H2ResponseWriter(object):
         )
         self.write()
         self.content_written = last
+        self.h2_lock.release()
 
     def get_max_payload_size(self):
         return min(self.h2conn.remote_settings.max_frame_size, self.h2conn.local_flow_control_window(self.request.h2_stream_id)) - 9
